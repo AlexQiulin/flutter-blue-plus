@@ -408,7 +408,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
                           if (!isConnected) {
                             Toast().msg('当前未连接任何设备');
                           } else {
-                            write('ALLINIT=1', true); // 不执行初始化
+                            write('INITBLE', true); // 不执行初始化
                           }
                         },
                         child: const Text('重置模块'),
@@ -437,7 +437,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
                           if (!isConnected) {
                             Toast().msg('当前未连接任何设备');
                           } else {
-                            write('TOKEN?=$bleToken', true); // 不执行初始化
+                            write('TOKEN=$bleToken', true); // 不执行初始化
                           }
                         },
                         child: const Text('验证令牌'),
@@ -472,124 +472,6 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
                           foregroundColor: Colors.white,
                         ),
                         child: const Text('清除缓存'),
-                      ),
-                    ],
-                  ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      ElevatedButton(
-                        onPressed: () {
-                          if (!isConnected) {
-                            Toast().msg('当前未连接任何设备');
-                          } else {
-                            write('RUN=$run1'); // 不执行初始化
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xff282828),
-                          foregroundColor: Colors.white,
-                        ),
-                        child: const Text('开始运行'),
-                      ),
-                      ElevatedButton(
-                        onPressed: () {
-                          if (!isConnected) {
-                            Toast().msg('当前未连接任何设备');
-                          } else {
-                            write('STOPRUN1');
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xff282828),
-                          foregroundColor: Colors.white,
-                        ),
-                        child: const Text('停止运行'),
-                      ),
-                      ElevatedButton(
-                        onPressed: () {
-                          if (!isConnected) {
-                            Toast().msg('当前未连接任何设备');
-                          } else {
-                            write('RUN=$run2,1,0'); // 不执行初始化
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xff282828),
-                          foregroundColor: Colors.white,
-                        ),
-                        child: const Text('开启过警'),
-                      ),
-                      ElevatedButton(
-                        onPressed: () async {
-                          if (!isConnected) {
-                            Toast().msg('当前未连接任何设备');
-                          } else {
-                            write('RUN=$run2,0,0');
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xff282828),
-                          foregroundColor: Colors.white,
-                        ),
-                        child: const Text('关闭过警'),
-                      ),
-                    ],
-                  ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      ElevatedButton(
-                        onPressed: () {
-                          if (!isConnected) {
-                            Toast().msg('当前未连接任何设备');
-                          } else {
-                            write('RUN=$run3,1,0');
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xff282828),
-                          foregroundColor: Colors.white,
-                        ),
-                        child: const Text('开启绝杀'),
-                      ),
-                      ElevatedButton(
-                        onPressed: () {
-                          if (!isConnected) {
-                            Toast().msg('当前未连接任何设备');
-                          } else {
-                            write('RUN=$run3,0,0');
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xff282828),
-                          foregroundColor: Colors.white,
-                        ),
-                        child: const Text('关闭绝杀'),
-                      ),
-                      ElevatedButton(
-                        onPressed: () {
-                          if (!isConnected) {
-                            Toast().msg('当前未连接任何设备');
-                          } else {}
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xff282828),
-                          foregroundColor: Colors.white,
-                        ),
-                        child: const Text('功能待定'),
-                      ),
-                      ElevatedButton(
-                        onPressed: () async {
-                          if (!isConnected) {
-                            Toast().msg('当前未连接任何设备');
-                          } else {}
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xff282828),
-                          foregroundColor: Colors.white,
-                        ),
-                        child: const Text('功能待定'),
                       ),
                     ],
                   ),
