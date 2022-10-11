@@ -1,6 +1,7 @@
 import 'package:bleinit/class/toast.dart';
 import 'package:flutter/material.dart';
 import 'dart:io';
+import 'dart:async';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
@@ -8,10 +9,12 @@ import 'package:get/get.dart';
 import 'package:bot_toast/bot_toast.dart';
 import 'package:wakelock/wakelock.dart';
 import 'package:bleinit/class/public.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 
+StreamController showLog = StreamController();
 void main() {
   // 设置android状态栏为透明的沉浸
   if (Platform.isAndroid) {
@@ -27,7 +30,7 @@ void main() {
     runApp(GetMaterialApp(
       builder: BotToastInit(), //1.调用BotToastInit - Toast
       navigatorObservers: [BotToastNavigatorObserver()], //2.注册路由观察者 - Toast
-      title: '蓝牙产品初始化', // APP后台运行名称
+      title: '博润初始化工具', // APP后台运行名称
       debugShowCheckedModeBanner: false, // 右上角的DEBUG字样
       home: const MyApp(),
     ));
@@ -42,7 +45,7 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
-  final List<String> tabs = const ['设备列表', '运行指令', '功能测试'];
+  final List<String> tabs = const ['设备列表', '运行指令'];
   late TabController _tabController;
   late FlutterBluePlus ble; // 蓝牙实例化
   late BluetoothDevice bleDevice; // 蓝牙设备
@@ -52,7 +55,9 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   late String run2; // RUN2 过警指令
   late String run3; // RUN3 扩展指令
   late String license; // 产品编号
-  RxList<Widget> runLog = [const Text('')].obs;
+  late String bleMac;
+  final dio = Dio(); // 实例化网络请求库
+  RxString runLog = RxString('');
   DeviceInfoPlugin deviceInfo = DeviceInfoPlugin(); // 安卓设备信息
   bool isLocation = false;
   bool isConnected = false; // 蓝牙连接状态 默认未连接false
@@ -61,7 +66,6 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   void initState() {
     // TODO: implement initState
     super.initState();
-    runLog.clear();
     _tabController = TabController(length: tabs.length, vsync: this);
     ble = FlutterBluePlus.instance; // 蓝牙构造函数
     Wakelock.enable(); // 屏幕保持常亮
@@ -73,7 +77,6 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     // TODO: implement dispose
     super.dispose();
     _tabController.dispose();
-    runLog.clear();
   }
 
   // 检查权限
@@ -99,9 +102,32 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       return;
     }
     Toast().loading('正在扫描附近的蓝牙设备');
-    ble.startScan(timeout: const Duration(seconds: 5)).then((value) {
+    ble.startScan(timeout: const Duration(milliseconds: 3500)).then((value) {
       ble.stopScan();
       Toast().msg('本次搜索结束');
+    });
+  }
+
+  // 开始连接
+  connectToBle() async {
+    await bleDevice.connect(autoConnect: false);
+    Toast().loading('正在连接');
+    await Storage().set('MAC', bleDevice.id.toString());
+    await bleDevice.discoverServices().then((value) {
+      List<BluetoothService> services = value
+          .where((element) =>
+              element.uuid == Guid('0000FFA0-0000-1000-8000-00805f9b34fb'))
+          .toList(); // 过滤主服务
+      List<BluetoothCharacteristic> characteristics = services[0]
+          .characteristics
+          .where((element) =>
+              element.uuid == Guid('0000FFA1-0000-1000-8000-00805f9b34fb'))
+          .toList(); // 过滤特征值
+      bleCharacteristic = characteristics[0]; // 赋值
+      md5Config();
+      // print(bleCharacteristic.isNotifying,StackTrace.current);
+      notifyStatus(true);
+      bleStateListen(); // 监听蓝牙连接状态
     });
   }
 
@@ -109,23 +135,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   bleStateListen() {
     bleDevice.state.listen((event) async {
       if (event == BluetoothDeviceState.connected) {
-        Toast().loading('正在连接');
         isConnected = true;
-        await Storage().set('MAC', bleDevice.id.toString());
-        await bleDevice.discoverServices().then((value) async {
-          List<BluetoothService> services = value
-              .where((element) =>
-                  element.uuid == Guid('0000FFA0-0000-1000-8000-00805f9b34fb'))
-              .toList(); // 过滤主服务
-          List<BluetoothCharacteristic> characteristics = services[0]
-              .characteristics
-              .where((element) =>
-                  element.uuid == Guid('0000FFA1-0000-1000-8000-00805f9b34fb'))
-              .toList(); // 过滤特征值
-          bleCharacteristic = characteristics[0]; // 赋值
-          md5Config();
-          await notifyStatus(true);
-        });
       }
       if (event == BluetoothDeviceState.disconnected) {
         isConnected = false;
@@ -138,12 +148,13 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   // MD5 加密
   md5Config() {
     List<int> md5License = const Utf8Encoder().convert('${bleDevice.id}');
-    license = md5.convert(md5License).toString().toUpperCase();
+    license = md5.convert(md5License).toString().substring(1, 9).toUpperCase();
     List<int> md5BleConfig = const Utf8Encoder().convert('${license}');
-    bleToken = md5.convert(md5BleConfig).toString().toUpperCase();
-    run1 = md5.convert(md5BleConfig).toString().toUpperCase();
-    run2 = md5.convert(md5BleConfig).toString().toUpperCase();
-    run3 = md5.convert(md5BleConfig).toString().toUpperCase();
+    bleToken =
+        md5.convert(md5BleConfig).toString().substring(0, 4).toUpperCase();
+    run1 = md5.convert(md5BleConfig).toString().substring(1, 5).toUpperCase();
+    run2 = md5.convert(md5BleConfig).toString().substring(2, 6).toUpperCase();
+    run3 = md5.convert(md5BleConfig).toString().substring(3, 7).toUpperCase();
   }
 
   // 运行配置
@@ -151,13 +162,14 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
     if (!isConnected) {
       return Toast().msg('当前未连接任何设备');
     }
-    write('TOKENSET=$bleToken'); // 步骤1：设置TOKEN
+    write('TOKENSET=$bleToken');
   }
 
   // 写数据
   write(String data, [bool noInit = false]) async {
     noRunInit = noInit;
-    List<int> bytes = utf8.encode('$data\r\n'); // 转换成Utf8List发送，最后要添加回车
+    // print('写入的数据是：TS+$data',StackTrace.current);
+    List<int> bytes = utf8.encode('TS+$data\r\n'); // 转换成Utf8List发送，最后要添加回车
     bleCharacteristic.write(bytes);
   }
 
@@ -165,21 +177,21 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   notifyStatus(bool status) async {
     await bleCharacteristic.setNotifyValue(status);
     // 监听Notify数据
-    bleCharacteristic.value.listen((value) {
+    bleCharacteristic.value.listen((value) async {
       List<int> bytes = value.map((e) => e).toList();
       String result = utf8
           .decode(bytes, allowMalformed: true)
           .replaceAll("\r\n", ""); // 去除了回车符号
       List<String> msg = result.split('|');
-      print('Notify返回的数据：$msg', StackTrace.current);
+      // print('Notify返回的数据：$msg',StackTrace.current);
       if (msg[0] == '') {
+        runLog('');
+        addLog('特征值获取成功');
+        addLog('License：$license');
+        addLog('Token：$bleToken');
         Toast().msg('连接成功');
-        runLog.clear();
-        addLog('${bleDevice.name} 连接成功');
-        addLog('模块License：$license');
-        addLog('模块Token：$bleToken');
       } else {
-        if (msg[0] == 'NOT TOKEN') {
+        if (msg[0] == 'TOKEN ERROR') {
           addLog('模块未初始化');
           Toast().msg('请先进行初始化');
           return;
@@ -192,22 +204,37 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
   // Notify处理
   notifyEvent(Map<String, String> map) async {
     switch (map['key']) {
-      case 'TOKENS':
+      case 'TS+TOKENSET':
         if (map['value'] == 'ER') {
-          Toast().msg('TOKEN已存在,请重置模块程序');
-          addLog('TOKEN已存在,请重置模块程序');
+          Toast().msg('TOKEN已存在');
+          addLog('TOKEN已存在');
         }
         if (map['value'] == 'OK') {
           addLog('TOKEN设置成功：$bleToken');
-          write('TOKEN?=$bleToken'); // 步骤2：验证TOKEN
+          write('TOKEN?=$bleToken');
         }
         break;
     }
   }
 
+  connectToMac() async {
+    bleMac = await Storage().get(String, 'MAC');
+    if (bleMac == 'false') {
+      return Toast().msg('暂无Mac缓存,无法重连');
+    }
+    Toast().loading('正在回连设备');
+    bleDevice = BluetoothDevice.fromId(bleMac); // 根据缓存中的MAC地址连接蓝牙
+    connectToBle();
+  }
+
   // 添加日志
+  String lastLog = '';
   addLog(String data) {
-    runLog.add(Text('${runLog.length + 1} $data'));
+    if (lastLog == data) {
+      return;
+    } // 过滤重复信息
+    lastLog = data;
+    runLog('$runLog\r\n$data'); // Obx 换行追加
   }
 
   @override
@@ -220,7 +247,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
           if (state == BluetoothState.on) {
             return Scaffold(
               appBar: AppBar(
-                title: const Text('初始化工具'),
+                title: const Text('蓝牙工具'),
                 bottom: _buildTabBar(),
               ),
               body: _buildTabBarView(),
@@ -254,7 +281,6 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
       TabBarView(controller: _tabController, children: [
         deviceList(),
         runOrder(),
-        const Text('3'),
       ]);
 
   Widget deviceList() => Stack(
@@ -327,11 +353,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
                       onPressed: () async {
                         if (!isConnected) {
                           bleDevice = r.device;
-                          await bleDevice
-                              .connect(autoConnect: false)
-                              .then((value) {
-                            bleStateListen(); // 监听蓝牙连接状态
-                          });
+                          connectToBle();
                         } else {
                           await bleDevice.disconnect();
                         }
@@ -373,45 +395,26 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
                           if (isConnected) {
                             return Toast().msg('请先断开当前的设备连接');
                           }
-                          String bleMac = await Storage().get(String, 'MAC');
-                          if (bleMac == 'false') {
-                            return Toast().msg('暂无Mac缓存,无法重连');
-                          }
-                          bleDevice =
-                              BluetoothDevice.fromId(bleMac); // 根据缓存中的MAC地址连接蓝牙
-                          await bleDevice
-                              .connect(autoConnect: false)
-                              .then((value) {
-                            bleStateListen(); // 监听蓝牙连接状态
-                          });
-
-                          // if(!isConnected){
-                          //   Toast().msg('当前未连接任何设备');
-                          // }else{
-                          //   write('TOKEN?=$bleToken',true); // 不执行初始化
-                          //   Future.delayed(const Duration(milliseconds: 500),(){
-                          //     write('PEIDUI=0',true); // 不执行初始化
-                          //     addLog('执行了禁用配对');
-                          //   });
-                          // }
+                          connectToMac();
                         },
                         child: const Text('缓存重连'),
                       ),
                       ElevatedButton(
                         onPressed: () {
-                          runLog.clear();
+                          runLog('');
                         },
-                        child: const Text('清除日志'),
+                        child: const Text('清空日志'),
                       ),
                       ElevatedButton(
-                        onPressed: () {
+                        onPressed: () async {
                           if (!isConnected) {
                             Toast().msg('当前未连接任何设备');
                           } else {
-                            write('INITBLE', true); // 不执行初始化
+                            write('ALL=1', true); // 不执行初始化
+                            await Storage().remove('MAC');
                           }
                         },
-                        child: const Text('重置模块'),
+                        child: const Text('所有信息'),
                       ),
                       ElevatedButton(
                         onPressed: () async {
@@ -437,7 +440,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
                           if (!isConnected) {
                             Toast().msg('当前未连接任何设备');
                           } else {
-                            write('TOKEN=$bleToken', true); // 不执行初始化
+                            write('kEYIS=$bleToken', true); // 不执行初始化
                           }
                         },
                         child: const Text('验证令牌'),
@@ -447,7 +450,7 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
                           if (!isConnected) {
                             Toast().msg('当前未连接任何设备');
                           } else {
-                            write('RSSI?', true); // 不执行初始化
+                            write('XINHAO?', true); // 不执行初始化
                           }
                         },
                         child: const Text('信号探测'),
@@ -457,10 +460,10 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
                           if (!isConnected) {
                             Toast().msg('当前未连接任何设备');
                           } else {
-                            Toast().msg('该功能待定开发中');
+                            write('VIEW', true);
                           }
                         },
-                        child: const Text('功能未定'),
+                        child: const Text('查看名称'),
                       ),
                       ElevatedButton(
                         onPressed: () async {
@@ -475,19 +478,134 @@ class _MyAppState extends State<MyApp> with SingleTickerProviderStateMixin {
                       ),
                     ],
                   ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      ElevatedButton(
+                        onPressed: () {
+                          if (!isConnected) {
+                            Toast().msg('当前未连接任何设备');
+                          } else {
+                            write('RUN=$run1'); // 不执行初始化
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xff282828),
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('开始'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () {
+                          if (!isConnected) {
+                            Toast().msg('当前未连接任何设备');
+                          } else {
+                            write('RUN=$run2,1,0'); // 不执行初始化
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xff282828),
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('开启A'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () {
+                          if (!isConnected) {
+                            Toast().msg('当前未连接任何设备');
+                          } else {
+                            write('RUN=$run3,1,0');
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xff282828),
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('开启B'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () {
+                          if (!isConnected) {
+                            Toast().msg('当前未连接任何设备');
+                          } else {
+                            Toast().msg('功能待定');
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xff282828),
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('功能待定'),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      ElevatedButton(
+                        onPressed: () {
+                          if (!isConnected) {
+                            Toast().msg('当前未连接任何设备');
+                          } else {
+                            write('STOPRUN1');
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xff282828),
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('停止A'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () async {
+                          if (!isConnected) {
+                            Toast().msg('当前未连接任何设备');
+                          } else {
+                            write('RUN=$run2,0,0');
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xff282828),
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('关闭B'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () {
+                          if (!isConnected) {
+                            Toast().msg('当前未连接任何设备');
+                          } else {
+                            write('RUN=$run3,0,0');
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xff282828),
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('关闭C'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () async {
+                          if (!isConnected) {
+                            Toast().msg('当前未连接任何设备');
+                          } else {
+                            Toast().msg('功能待定');
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xff282828),
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('功能待定'),
+                      ),
+                    ],
+                  ),
                   Container(
                     margin: const EdgeInsets.only(top: 15),
                     child: const Text('执行日志',
                         style: TextStyle(fontSize: 18, color: Colors.black54)),
                   ),
-                  Container(
-                    margin: const EdgeInsets.only(top: 5),
-                    padding: const EdgeInsets.only(top: 5),
-                    child: Obx(() => Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: runLog,
-                        )),
-                  )
+                  Obx(() => Text('$runLog'))
                 ],
               ),
             ),
